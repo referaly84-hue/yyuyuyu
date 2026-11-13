@@ -4083,7 +4083,9 @@ function executeTransferIfBothApproved(t) {
       p.teamId = t.to;
       delete p.formerClub;
       delete p.releasedAt;
-      tryAutoRegisterPlayer(t.to, p);
+      if (t.type !== "free_agent" || t.registerOnApprove) {
+        tryAutoRegisterPlayer(t.to, p);
+      }
       const isMandatoryBuyout = !!(t.mandatoryBuyoutOnRplRetention || t.mandatoryBuyout || t.type === "loan_mandatory_rpl");
       const loanCond = t.loanCondition || (isMandatoryBuyout ? "\u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0435 \u043F\u0440\u043E\u043F\u0438\u0441\u043A\u0438 \u0432 \u0420\u041F\u041B" : null);
       if (t.type === "loan" || isMandatoryBuyout) {
@@ -11947,43 +11949,42 @@ app.post("/api/club/free-agent/sign", needClub, (req, res) => {
   const p = player(pid);
   if (!p) return fail(res, "Игрок не найден", 404);
   if (p.teamId) return fail(res, `Игрок уже числится в клубе «${tn(p.teamId)}»`);
-  const prevClub = p.formerClub || "Свободный агент";
-  p.teamId = req.tid;
-  delete p.formerClub;
-  delete p.releasedAt;
-  delete p.loanFrom;
-  delete p.loanTerm;
-  delete p.mandatoryBuyoutOnRplRetention;
-  delete p.mandatoryBuyout;
-  delete p.buyoutFee;
-  delete p.loanCondition;
-  const registered = req.body.register ? tryAutoRegisterPlayer(req.tid, p) : false;
   if (!Array.isArray(db.transfers)) db.transfers = [];
-  db.transfers.unshift({
+  const dup = db.transfers.find((t) => t.status === "pending" && t.type === "free_agent" && t.pid === p.id && t.to === req.tid);
+  if (dup) {
+    return fail(res, `Заявка на подписание свободного агента ${p.name} уже отправлена и ожидает одобрения администратора`);
+  }
+  const prevClub = p.formerClub || "Свободный агент";
+  const trObj = {
     id: uid(),
     pid: p.id,
     playerName: p.name,
     pos: p.pos || "ЦП",
     from: null,
-    fromName: "Свободный агент",
+    fromName: prevClub !== "Свободный агент" ? `Свободный агент (ранее: ${prevClub})` : "Свободный агент",
     to: req.tid,
     toName: tn(req.tid),
     fee: "Свободный агент",
     feeAmount: 0,
     type: "free_agent",
+    isFreeAgent: true,
+    isRplToRpl: false,
+    registerOnApprove: !!req.body.register,
     note: prevClub !== "Свободный агент" ? `Подписание свободного агента (ранее: ${prevClub})` : "Подписание свободного агента",
-    status: "approved",
+    status: "pending",
     clubApproval: "approved",
-    adminApproval: "approved",
+    adminApproval: "pending",
+    initiator: req.tid,
     date: todayMsk(),
     at: Date.now()
-  });
+  };
+  db.transfers.unshift(trObj);
   save();
   res.json({
     ok: 1,
-    registered,
-    player: pubPlayer(p),
-    message: `${p.name} подписан в общий состав клуба «${tn(req.tid)}»${registered ? " и включён в заявку на сезон" : ""}`
+    pending: true,
+    transfer: trObj,
+    message: `Заявка на подписание свободного агента ${p.name} в клуб «${tn(req.tid)}» отправлена администратору на одобрение`
   });
 });
 app.post("/api/admin/transfer-window", admin, (req, res) => {
@@ -12937,8 +12938,19 @@ app.post("/api/admin/transfer", admin, (req, res) => {
 app.post("/api/admin/transfer/respond", admin, (req, res) => {
   const { transferId, action, force } = req.body;
   const t = db.transfers.find((x) => x.id === transferId);
-  if (!t || t.status !== "pending") return fail(res, "\u0417\u0430\u044F\u0432\u043A\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u0438\u043B\u0438 \u0443\u0436\u0435 \u0437\u0430\u043A\u0440\u044B\u0442\u0430");
+  if (!t || t.status !== "pending") return fail(res, "Заявка не найдена или уже закрыта");
   if (action === "approve") {
+    if (t.type === "free_agent") {
+      const p = player(t.pid);
+      if (!p) return fail(res, "Игрок не найден", 404);
+      if (p.teamId && p.teamId !== t.to) {
+        t.adminApproval = "rejected";
+        t.status = "rejected";
+        t.rejectReason = `Игрок уже подписан клубом «${tn(p.teamId)}»`;
+        save();
+        return fail(res, `Игрок ${p.name} уже подписан клубом «${tn(p.teamId)}»`);
+      }
+    }
     t.adminApproval = "approved";
     if (force || !t.isRplToRpl) {
       t.clubApproval = "approved";
@@ -12950,14 +12962,18 @@ app.post("/api/admin/transfer/respond", admin, (req, res) => {
       approved: true,
       executed,
       transfer: t,
-      message: executed ? "\u0421\u0434\u0435\u043B\u043A\u0430 \u043E\u043A\u043E\u043D\u0447\u0430\u0442\u0435\u043B\u044C\u043D\u043E \u043E\u0434\u043E\u0431\u0440\u0435\u043D\u0430 \u0438 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0430!" : "\u0410\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043E\u0434\u043E\u0431\u0440\u0438\u043B \u0441\u0434\u0435\u043B\u043A\u0443. \u041E\u0436\u0438\u0434\u0430\u0435\u0442\u0441\u044F \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043D\u0438\u0435 \u043E\u0442 \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u043A\u043B\u0443\u0431\u0430."
+      message: executed
+        ? (t.type === "free_agent"
+          ? `Подписание свободного агента ${t.playerName} в «${t.toName}» одобрено администратором!`
+          : "Сделка окончательно одобрена и завершена!")
+        : "Администратор одобрил сделку. Ожидается подтверждение от владельца клуба."
     });
   } else {
     t.adminApproval = "rejected";
     t.status = "rejected";
-    t.rejectReason = "\u041E\u0442\u043A\u043B\u043E\u043D\u0435\u043D\u043E \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u043E\u043C";
+    t.rejectReason = "Отклонено администратором";
     save();
-    res.json({ ok: 1, rejected: true, message: "\u0421\u0434\u0435\u043B\u043A\u0430 \u043E\u0442\u043A\u043B\u043E\u043D\u0435\u043D\u0430 \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u043E\u043C" });
+    res.json({ ok: 1, rejected: true, message: "Сделка отклонена администратором" });
   }
 });
 app.post("/api/admin/transfer/ai-advice", admin, async (req, res) => {
@@ -14854,40 +14870,79 @@ ${squadText}
     flaggedPlayers: flagged
   });
 });
-async function enrichEuropeanPlayer(playerName, feeStr, transferType = "transfer") {
+function normalizeEuroPos(raw) {
+  const s = String(raw || "").trim().toUpperCase();
+  if (!s) return "";
+  if (POSES.includes(s)) return s;
+  const map = {
+    GK: "ВР", ВРАТАРЬ: "ВР",
+    CB: "ЦЗ", LB: "ЛЗ", RB: "ПЗ", LWB: "ЛЗ", RWB: "ПЗ", DF: "ЦЗ", DEF: "ЦЗ", ЗАЩ: "ЦЗ", ЗАЩИТНИК: "ЦЗ",
+    CDM: "ОП", DM: "ОП", CM: "ЦП", MF: "ЦП", MID: "ЦП", CAM: "АП", AM: "АП", LM: "ЛП", RM: "ПП", ПОЛУЗАЩИТНИК: "ЦП",
+    LW: "ЛВ", RW: "ПВ", ST: "ЦФ", CF: "ЦФ", FW: "ЦФ", ATT: "ЦФ", НАП: "ЦФ", НАПАДАЮЩИЙ: "ЦФ", ФОРВАРД: "ЦФ"
+  };
+  return map[s] || "";
+}
+function parseEuroAge(raw) {
+  if (raw === void 0 || raw === null || raw === "") return null;
+  const m = String(raw).match(/\d{2}/);
+  if (!m) return null;
+  const n = Number(m[0]);
+  return n >= 14 && n <= 45 ? n : null;
+}
+async function enrichEuropeanPlayer(playerName, feeStr, transferType = "transfer", hints: { pos?: string; age?: number | null; fromClub?: string } = {}) {
   const cleanName = String(playerName || "").trim();
-  let pos = "\u0426\u041F", age2 = 24, nationality = "\u0418\u043D\u043E\u0441\u0442\u0440\u0430\u043D\u0435\u0446", fromClub = "\u0417\u0430\u0440\u0443\u0431\u0435\u0436\u043D\u044B\u0439 \u043A\u043B\u0443\u0431", marketValue = feeStr || "\u20AC10.0M", ovr = 75, style = "\u041B\u0435\u0433\u0438\u043E\u043D\u0435\u0440 \u0441 \u043E\u043F\u044B\u0442\u043E\u043C \u0432\u044B\u0441\u0442\u0443\u043F\u043B\u0435\u043D\u0438\u0439 \u0432 \u0435\u0432\u0440\u043E\u043F\u0435\u0439\u0441\u043A\u043E\u043C \u0447\u0435\u043C\u043F\u0438\u043E\u043D\u0430\u0442\u0435";
+  const hPos = normalizeEuroPos(hints?.pos);
+  const hAge = parseEuroAge(hints?.age);
+  const hClub = String(hints?.fromClub || "").trim();
+  let pos = hPos || "ЦП";
+  let age2 = hAge || 24;
+  let nationality = "Иностранец";
+  let fromClub = hClub || "Зарубежный клуб";
+  let marketValue = feeStr || "€10.0M";
+  let ovr = 75;
+  let style = "Легионер с опытом выступлений в европейском чемпионате";
+  const applyHints = (resObj) => ({
+    ...resObj,
+    pos: hPos || resObj.pos,
+    age: hAge || resObj.age,
+    fromClub: hClub || resObj.fromClub
+  });
   if (hasLLM()) {
     try {
-      const prompt = `\u0422\u044B \u2014 \u043C\u0435\u0436\u0434\u0443\u043D\u0430\u0440\u043E\u0434\u043D\u0430\u044F \u0444\u0443\u0442\u0431\u043E\u043B\u044C\u043D\u0430\u044F \u0431\u0430\u0437\u0430 \u0434\u0430\u043D\u043D\u044B\u0445 \u0438 \u0441\u043A\u0430\u0443\u0442\u0441\u043A\u0430\u044F \u0441\u043B\u0443\u0436\u0431\u0430 Transfermarkt. \u041D\u0430\u0439\u0434\u0438 \u0440\u0435\u0430\u043B\u044C\u043D\u043E\u0433\u043E \u0444\u0443\u0442\u0431\u043E\u043B\u0438\u0441\u0442\u0430 "${cleanName}".
-\u041E\u043F\u0440\u0435\u0434\u0435\u043B\u0438:
-- pos: \u0442\u043E\u0447\u043D\u043E\u0435 \u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0435 \u0430\u043C\u043F\u043B\u0443\u0430 \u0438\u0433\u0440\u043E\u043A\u0430 (\u0421\u0422\u0420\u041E\u0413\u041E \u041E\u0414\u041D\u041E \u0418\u0417: \u0412\u0420, \u0426\u0417, \u041B\u0417, \u041F\u0417, \u041E\u041F, \u0426\u041F, \u0410\u041F, \u041B\u0412, \u041F\u0412, \u0426\u0424)
-- age: \u0442\u043E\u0447\u043D\u044B\u0439 \u0432\u043E\u0437\u0440\u0430\u0441\u0442 (\u0447\u0438\u0441\u043B\u043E)
-- nationality: \u0441\u0442\u0440\u0430\u043D\u0430/\u0433\u0440\u0430\u0436\u0434\u0430\u043D\u0441\u0442\u0432\u043E \u043D\u0430 \u0440\u0443\u0441\u0441\u043A\u043E\u043C \u044F\u0437\u044B\u043A\u0435
-- fromClub: \u0442\u0435\u043A\u0443\u0449\u0438\u0439 \u0438\u043B\u0438 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0440\u0435\u0430\u043B\u044C\u043D\u044B\u0439 \u0435\u0432\u0440\u043E\u043F\u0435\u0439\u0441\u043A\u0438\u0439 \u0438\u043B\u0438 \u043C\u0438\u0440\u043E\u0432\u043E\u0439 \u043A\u043B\u0443\u0431
-- marketValue: \u043E\u0440\u0438\u0435\u043D\u0442\u0438\u0440\u043E\u0432\u043E\u0447\u043D\u0430\u044F \u0440\u044B\u043D\u043E\u0447\u043D\u0430\u044F \u0441\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u044C Transfermarkt (\u043D\u0430\u043F\u0440\u0438\u043C\u0435\u0440: "\u20AC15M", "\u20AC50M", "\u20AC4.5M")
-- ovr: \u0440\u0435\u0439\u0442\u0438\u043D\u0433 \u043C\u0430\u0441\u0442\u0435\u0440\u0441\u0442\u0432\u0430 OVR \u043E\u0442 65 \u0434\u043E 94 (\u0447\u0438\u0441\u043B\u043E)
-- style: \u0441\u0442\u0438\u043B\u044C \u0438\u0433\u0440\u044B \u0438 \u0441\u0438\u043B\u044C\u043D\u044B\u0435 \u0441\u0442\u043E\u0440\u043E\u043D\u044B (1 \u043A\u0440\u0430\u0442\u043A\u043E\u0435 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u0435)
+      const hintCtx = [
+        hPos ? `позиция: ${hPos}` : "",
+        hAge ? `возраст: ${hAge}` : "",
+        hClub ? `текущий клуб: ${hClub}` : ""
+      ].filter(Boolean).join(", ");
+      const prompt = `Ты — международная футбольная база данных и скаутская служба Transfermarkt. Найди реального футболиста "${cleanName}"${hintCtx ? ` (указанные данные: ${hintCtx})` : ""}.
+Определи:
+- pos: точное основное амплуа игрока (СТРОГО ОДНО ИЗ: ВР, ЦЗ, ЛЗ, ПЗ, ОП, ЦП, АП, ЛВ, ПВ, ЦФ)
+- age: точный возраст (число)
+- nationality: страна/гражданство на русском языке
+- fromClub: текущий или последний реальный европейский или мировой клуб
+- marketValue: ориентировочная рыночная стоимость Transfermarkt (например: "€15M", "€50M", "€4.5M")
+- ovr: рейтинг мастерства OVR от 65 до 94 (число)
+- style: стиль игры и сильные стороны (1 краткое предложение)
 
-\u041E\u0442\u0432\u0435\u0442\u044C \u0441\u0442\u0440\u043E\u0433\u043E \u0432 JSON:
+Ответь строго в JSON:
 {
-  "pos": "\u0426\u0424",
+  "pos": "ЦФ",
   "age": 26,
-  "nationality": "\u0428\u0432\u0435\u0446\u0438\u044F",
-  "fromClub": "\u0421\u043F\u043E\u0440\u0442\u0438\u043D\u0433",
-  "marketValue": "\u20AC70M",
+  "nationality": "Швеция",
+  "fromClub": "Спортинг",
+  "marketValue": "€70M",
   "ovr": 86,
-  "style": "\u041C\u043E\u0449\u043D\u044B\u0439 \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u0435\u043B\u044C \u0430\u0442\u0430\u043A \u0441 \u0432\u0435\u043B\u0438\u043A\u043E\u043B\u0435\u043F\u043D\u044B\u043C \u0433\u043E\u043B\u0435\u0432\u044B\u043C \u0447\u0443\u0442\u044C\u0451\u043C \u0438 \u0434\u0440\u0438\u0431\u043B\u0438\u043D\u0433\u043E\u043C"
+  "style": "Мощный завершитель атак с великолепным голевым чутьём и дриблингом"
 }`;
-      const info = await llmJSON("\u0422\u044B \u2014 \u0444\u0443\u0442\u0431\u043E\u043B\u044C\u043D\u0430\u044F \u0431\u0430\u0437\u0430 \u0434\u0430\u043D\u043D\u044B\u0445.", prompt, { task: "enrich-player", temp: 0.2, max: 400 });
-      if (info?.pos && POSES.includes(info.pos)) pos = info.pos;
-      if (info?.age && Number(info.age) >= 16 && Number(info.age) <= 45) age2 = Number(info.age);
+      const info = await llmJSON("Ты — футбольная база данных.", prompt, { task: "enrich-player", temp: 0.2, max: 400 });
+      if (!hPos && info?.pos && POSES.includes(info.pos)) pos = info.pos;
+      if (!hAge && info?.age && Number(info.age) >= 16 && Number(info.age) <= 45) age2 = Number(info.age);
       if (info?.nationality) nationality = String(info.nationality);
-      if (info?.fromClub) fromClub = String(info.fromClub);
+      if (!hClub && info?.fromClub) fromClub = String(info.fromClub);
       if (info?.marketValue) marketValue = String(info.marketValue);
       if (info?.ovr && Number(info.ovr) >= 60 && Number(info.ovr) <= 99) ovr = Number(info.ovr);
       if (info?.style) style = String(info.style);
-      return { pos, age: age2, nationality, fromClub, marketValue, ovr, style };
+      return applyHints({ pos, age: age2, nationality, fromClub, marketValue, ovr, style });
     } catch (e) {
       console.log("[Enrich Fallback] enrichEuropeanPlayer falling back to local data");
     }
@@ -14895,34 +14950,37 @@ async function enrichEuropeanPlayer(playerName, feeStr, transferType = "transfer
   const feeNum = parseFeeAmount(feeStr);
   ovr = Math.min(92, Math.max(70, Math.round(72 + Math.min(15, feeNum * 0.4))));
   if (/гюлер|guler/i.test(cleanName)) {
-    return { pos: "\u0410\u041F", age: 21, nationality: "\u0422\u0443\u0440\u0446\u0438\u044F", fromClub: "\u0420\u0435\u0430\u043B \u041C\u0430\u0434\u0440\u0438\u0434", marketValue: "\u20AC45M", ovr: 83, style: "\u0412\u0438\u0440\u0442\u0443\u043E\u0437\u043D\u044B\u0439 \u043F\u043B\u0435\u0439\u043C\u0435\u0439\u043A\u0435\u0440 \u0441 \u0444\u0438\u043B\u0438\u0433\u0440\u0430\u043D\u043D\u044B\u043C \u0432\u0438\u0434\u0435\u043D\u0438\u0435\u043C \u043F\u043E\u043B\u044F \u0438 \u043F\u0430\u0441\u043E\u043C" };
+    return applyHints({ pos: "АП", age: 21, nationality: "Турция", fromClub: "Реал Мадрид", marketValue: "€45M", ovr: 83, style: "Виртуозный плеймейкер с филигранным видением поля и пасом" });
   }
   if (/дьёкереш|gyokeres|гиокереш/i.test(cleanName)) {
-    return { pos: "\u0426\u0424", age: 28, nationality: "\u0428\u0432\u0435\u0446\u0438\u044F", fromClub: "\u0421\u043F\u043E\u0440\u0442\u0438\u043D\u0433", marketValue: "\u20AC70M", ovr: 87, style: "\u041D\u0435\u0443\u0434\u0435\u0440\u0436\u0438\u043C\u044B\u0439 \u0444\u043E\u0440\u0432\u0430\u0440\u0434-\u0431\u043E\u043C\u0431\u0430\u0440\u0434\u0438\u0440 \u0442\u0430\u0440\u0430\u043D\u043D\u043E\u0433\u043E \u0442\u0438\u043F\u0430" };
+    return applyHints({ pos: "ЦФ", age: 28, nationality: "Швеция", fromClub: "Спортинг", marketValue: "€70M", ovr: 87, style: "Неудержимый форвард-бомбардир таранного типа" });
   }
   if (/эндрик|endrick/i.test(cleanName)) {
-    return { pos: "\u0426\u0424", age: 20, nationality: "\u0411\u0440\u0430\u0437\u0438\u043B\u0438\u044F", fromClub: "\u0420\u0435\u0430\u043B \u041C\u0430\u0434\u0440\u0438\u0434", marketValue: "\u20AC60M", ovr: 82, style: "\u0412\u0437\u0440\u044B\u0432\u043D\u043E\u0439 \u0431\u0440\u0430\u0437\u0438\u043B\u044C\u0441\u043A\u0438\u0439 \u0432\u0443\u043D\u0434\u0435\u0440\u043A\u0438\u043D\u0434 \u0441 \u043F\u0443\u0448\u0435\u0447\u043D\u044B\u043C \u0443\u0434\u0430\u0440\u043E\u043C" };
+    return applyHints({ pos: "ЦФ", age: 20, nationality: "Бразилия", fromClub: "Реал Мадрид", marketValue: "€60M", ovr: 82, style: "Взрывной бразильский вундеркинд с пушечным ударом" });
   }
   if (/леонардо|leonardo/i.test(cleanName)) {
-    return { pos: "\u0426\u0424", age: 23, nationality: "\u0411\u0440\u0430\u0437\u0438\u043B\u0438\u044F", fromClub: "\u0411\u0435\u043D\u0444\u0438\u043A\u0430", marketValue: "\u20AC25M", ovr: 80, style: "\u0411\u044B\u0441\u0442\u0440\u044B\u0439 \u0438 \u043F\u043B\u0430\u0441\u0442\u0438\u0447\u043D\u044B\u0439 \u0431\u0440\u0430\u0437\u0438\u043B\u044C\u0441\u043A\u0438\u0439 \u043D\u0430\u043F\u0430\u0434\u0430\u044E\u0449\u0438\u0439 \u0448\u0442\u0440\u0430\u0444\u043D\u043E\u0439 \u043F\u043B\u043E\u0449\u0430\u0434\u0438" };
+    return applyHints({ pos: "ЦФ", age: 23, nationality: "Бразилия", fromClub: "Бенфика", marketValue: "€25M", ovr: 80, style: "Быстрый и пластичный бразильский нападающий штрафной площади" });
   }
-  return { pos, age: age2, nationality, fromClub, marketValue: feeStr || `\u20AC${(ovr - 65) * 1.5}M`, ovr, style };
+  return applyHints({ pos, age: age2, nationality, fromClub, marketValue: feeStr || `€${(ovr - 65) * 1.5}M`, ovr, style });
 }
 app.post("/api/club/transfer-request", needClub, async (req, res) => {
-  const { playerName, fee, transferType, list, text, players } = req.body;
+  const { playerName, fee, transferType, list, text, players, pos, age, fromClub, club, europeanClub } = req.body;
   const buyerTeam = team(req.me.teamId);
-  if (!buyerTeam) return fail(res, "\u041A\u043B\u0443\u0431 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D");
+  if (!buyerTeam) return fail(res, "Клуб не найден");
   let itemsToProcess = [];
   if (Array.isArray(players) && players.length > 0) {
     itemsToProcess = players.map((p) => {
       const isMand = String(p.transferType || p.type || "").includes("mandatory") || !!p.mandatoryBuyout;
       return {
         name: String(p.playerName || p.name || "").trim(),
-        fee: String(p.fee || "\u20AC5.0M").trim(),
+        pos: normalizeEuroPos(p.pos),
+        age: parseEuroAge(p.age),
+        fromClub: String(p.fromClub || p.club || p.europeanClub || "").trim(),
+        fee: String(p.fee || "€5.0M").trim(),
         type: isMand ? "loan_mandatory_rpl" : String(p.transferType || p.type || "").includes("loan") ? "loan" : "transfer",
         mandatoryBuyout: isMand,
-        buyoutFee: isMand ? String(p.buyoutFee || p.fee || "\u20AC8.0M").trim() : void 0,
-        loanCondition: isMand ? String(p.loanCondition || p.buyoutCondition || "\u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0435 \u043F\u0440\u043E\u043F\u0438\u0441\u043A\u0438 \u0432 \u0420\u041F\u041B").trim() : void 0,
+        buyoutFee: isMand ? String(p.buyoutFee || p.fee || "€8.0M").trim() : void 0,
+        loanCondition: isMand ? String(p.loanCondition || p.buyoutCondition || "Сохранение прописки в РПЛ").trim() : void 0,
         sellOnPercent: Math.min(90, Math.max(0, Number(p.sellOnPercent) || 0))
       };
     }).filter((x) => x.name.length > 0);
@@ -14931,22 +14989,51 @@ app.post("/api/club/transfer-request", needClub, async (req, res) => {
     for (const rawLine of rawLines) {
       const l = rawLine.trim();
       if (!l || l.startsWith("#") || l.startsWith("//")) continue;
-      const parts = l.split(/[,;\-—–]+/).map((s) => s.trim()).filter(Boolean);
+      const parts = l.split(/[,;—–]+|\s+-\s+/).map((s) => s.trim()).filter(Boolean);
       if (parts.length === 0) continue;
       const name = parts[0];
-      const feePart = parts.length > 1 ? parts[1] : "\u20AC5.0M";
-      const typePart = parts.length > 2 ? parts[2] : "";
-      const extraPart = parts.length > 3 ? parts[3] : "";
-      const fullLine = (typePart + " " + extraPart + " " + feePart).toLowerCase();
+      const fullLine = l.toLowerCase();
       const isMand = /сохранении|прописки|mandatory|выкуп|услови/i.test(fullLine);
-      const isLoan = isMand || /аренда|loan/i.test(typePart) || /аренда|loan/i.test(feePart);
+      const isLoan = isMand || /аренда|loan/i.test(fullLine);
       const sellMatch = fullLine.match(/(?:sell[- ]?on|перепродаж\w*)[^\d]*(\d+)\s*%/i) || fullLine.match(/(\d+)\s*%\s*(?:sell[- ]?on|перепродаж\w*)/i);
       const sellOnPct = sellMatch ? Math.min(90, Math.max(0, Number(sellMatch[1]))) : 0;
-      let cond = isMand ? "\u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0435 \u043F\u0440\u043E\u043F\u0438\u0441\u043A\u0438 \u0432 \u0420\u041F\u041B" : void 0;
+      let cond = isMand ? "Сохранение прописки в РПЛ" : void 0;
       const condMatch = l.match(/услови[^\s:]*:\s*([^,;]+)/i) || l.match(/при условии\s*([^,;]+)/i);
       if (condMatch) cond = condMatch[1].trim();
+      let parsedPos = "";
+      let parsedAge = null;
+      let parsedClub = "";
+      let feePart = "";
+      for (const tok of parts.slice(1)) {
+        const maybePos = normalizeEuroPos(tok);
+        if (!parsedPos && maybePos) {
+          parsedPos = maybePos;
+          continue;
+        }
+        if (parsedAge === null && /^(?:возраст[:\s]*)?(\d{2})(?:\s*(?:л\.|лет|год|года))?$/i.test(tok)) {
+          const a = parseEuroAge(tok);
+          if (a !== null) {
+            parsedAge = a;
+            continue;
+          }
+        }
+        if (!feePart && (/[€$₽]|\b\d+(?:[.,]\d+)?\s*(?:M|K|млн|тыс)\b/i.test(tok) || /^\d+(?:[.,]\d+)?$/.test(tok))) {
+          feePart = tok;
+          continue;
+        }
+        if (/(?:покупка|трансфер|аренда|loan|transfer|выкуп|sell[- ]?on|перепродаж|услови|%)/i.test(tok)) {
+          continue;
+        }
+        if (!parsedClub) {
+          parsedClub = tok.replace(/^клуб[:\s]*/i, "").trim();
+        }
+      }
+      if (!feePart) feePart = "€5.0M";
       itemsToProcess.push({
         name,
+        pos: parsedPos,
+        age: parsedAge,
+        fromClub: parsedClub,
         fee: feePart,
         type: isMand ? "loan_mandatory_rpl" : isLoan ? "loan" : "transfer",
         mandatoryBuyout: isMand,
@@ -14959,20 +15046,27 @@ app.post("/api/club/transfer-request", needClub, async (req, res) => {
     const isMand = String(transferType || "").includes("mandatory") || !!req.body.mandatoryBuyout;
     itemsToProcess.push({
       name: String(playerName).trim(),
-      fee: String(fee || "\u20AC5.0M").trim(),
+      pos: normalizeEuroPos(pos),
+      age: parseEuroAge(age),
+      fromClub: String(fromClub || club || europeanClub || "").trim(),
+      fee: String(fee || "€5.0M").trim(),
       type: isMand ? "loan_mandatory_rpl" : String(transferType || "").includes("loan") ? "loan" : "transfer",
       mandatoryBuyout: isMand,
-      buyoutFee: isMand ? String(req.body.buyoutFee || fee || "\u20AC8.0M").trim() : void 0,
-      loanCondition: isMand ? String(req.body.loanCondition || req.body.buyoutCondition || "\u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0435 \u043F\u0440\u043E\u043F\u0438\u0441\u043A\u0438 \u0432 \u0420\u041F\u041B").trim() : void 0,
+      buyoutFee: isMand ? String(req.body.buyoutFee || fee || "€8.0M").trim() : void 0,
+      loanCondition: isMand ? String(req.body.loanCondition || req.body.buyoutCondition || "Сохранение прописки в РПЛ").trim() : void 0,
       sellOnPercent: Math.min(90, Math.max(0, Number(req.body.sellOnPercent) || 0))
     });
   }
   if (!itemsToProcess.length) {
-    return fail(res, "\u0423\u043A\u0430\u0436\u0438\u0442\u0435 \u0424\u0418\u041E \u0438\u0433\u0440\u043E\u043A\u0430 \u0438 \u0446\u0435\u043D\u0443 (\u0438\u043B\u0438 \u0432\u0432\u0435\u0434\u0438\u0442\u0435 \u0441\u043F\u0438\u0441\u043E\u043A \u0438\u0433\u0440\u043E\u043A\u043E\u0432)");
+    return fail(res, "Укажите ФИО игрока, позицию, возраст, клуб и цену (или введите список игроков)");
   }
   const createdRequests = [];
   for (const item of itemsToProcess) {
-    const enriched = await enrichEuropeanPlayer(item.name, item.fee, item.type);
+    const enriched = await enrichEuropeanPlayer(item.name, item.fee, item.type, {
+      pos: item.pos,
+      age: item.age,
+      fromClub: item.fromClub
+    });
     const reqObj = {
       id: "trq_" + uid(),
       clubId: req.me.teamId,
@@ -14986,13 +15080,13 @@ app.post("/api/club/transfer-request", needClub, async (req, res) => {
       marketValue: enriched.marketValue,
       ovr: enriched.ovr,
       style: enriched.style,
-      fee: item.fee || enriched.marketValue || "\u041F\u043E \u0441\u043E\u0433\u043B\u0430\u0441\u043E\u0432\u0430\u043D\u0438\u044E",
+      fee: item.fee || enriched.marketValue || "По согласованию",
       feeAmount: parseFeeAmount(item.fee || enriched.marketValue),
       transferType: item.type,
       mandatoryBuyoutOnRplRetention: !!item.mandatoryBuyout,
       mandatoryBuyout: !!item.mandatoryBuyout,
       buyoutFee: item.buyoutFee || null,
-      loanCondition: item.loanCondition || (item.mandatoryBuyout ? "\u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0435 \u043F\u0440\u043E\u043F\u0438\u0441\u043A\u0438 \u0432 \u0420\u041F\u041B" : null),
+      loanCondition: item.loanCondition || (item.mandatoryBuyout ? "Сохранение прописки в РПЛ" : null),
       sellOnPercent: Number(item.sellOnPercent) || 0,
       status: "pending",
       aiVerdict: null,
@@ -15006,7 +15100,7 @@ app.post("/api/club/transfer-request", needClub, async (req, res) => {
     ok: 1,
     count: createdRequests.length,
     requests: createdRequests,
-    message: createdRequests.length === 1 ? `\u0417\u0430\u044F\u0432\u043A\u0430 \u043F\u043E \u0438\u0433\u0440\u043E\u043A\u0443 ${createdRequests[0].playerName} \u0438\u0437 \u0415\u0432\u0440\u043E\u043F\u044B \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0430 \u043D\u0430 \u0440\u0430\u0441\u0441\u043C\u043E\u0442\u0440\u0435\u043D\u0438\u0435 \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0443.` : `\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E ${createdRequests.length} \u0437\u0430\u044F\u0432\u043E\u043A \u043D\u0430 \u0442\u0440\u0430\u043D\u0441\u0444\u0435\u0440\u044B \u0438\u0437 \u0415\u0432\u0440\u043E\u043F\u044B \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0443.`
+    message: createdRequests.length === 1 ? `Заявка по игроку ${createdRequests[0].playerName} из Европы отправлена на рассмотрение администратору.` : `Отправлено ${createdRequests.length} заявок на трансферы из Европы администратору.`
   });
 });
 app.get("/api/club/transfer-requests", needClub, (req, res) => {
@@ -15145,12 +15239,13 @@ app.post("/api/admin/transfer-requests/resolve", admin, (req, res) => {
       });
     }
     const playerAge = r.age || 25;
+    const seasonBaseYear = Number(String(S()).slice(0, 4)) || 2026;
     const newPlayer = {
       id: "p_" + uid(),
       name: r.playerName,
-      pos: r.pos || "\u0426\u041F",
+      pos: r.pos || "ЦП",
       age: playerAge,
-      born: `${2026 - playerAge}-05-15`,
+      born: `${seasonBaseYear - playerAge}-05-15`,
       nat: r.nationality || "\u0418\u043D\u043E\u0441\u0442\u0440\u0430\u043D\u0435\u0446",
       teamId: r.clubId,
       ovr: r.ovr || 75,

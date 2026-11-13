@@ -4182,7 +4182,7 @@ function renderEuropeanTransferPanelHtml() {
             <span class="tag" style="background:#dbeafe;color:#1e40af;font-size:11.5px">Проверка админа + ИИ</span>
           </h3>
           <p class="muted small" style="margin:4px 0 0">
-            Для заявки достаточно указать только <b>ФИО игрока</b> и <b>сумму сделки</b> (покупка или аренда). Все остальные данные (клуб в Европе, позицию, возраст, гражданство, рыночную цену и рейтинг) <b>нейросеть найдёт автоматически</b>. Заявка поступит администратору лиги, который проверит трансфер.
+            Для заявки укажите <b>ФИО игрока</b>, <b>позицию</b>, <b>возраст</b>, <b>текущий клуб</b> и <b>сумму сделки</b> (покупка или аренда). Остальные данные (гражданство, рыночную цену и профиль) <b>нейросеть дополнит автоматически</b>. Заявка поступит администратору лиги.
           </p>
         </div>
         <div class="row" style="gap:4px">
@@ -4194,7 +4194,22 @@ function renderEuropeanTransferPanelHtml() {
       <!-- Ввод одного игрока -->
       <div id="tr_single_wrap" style="margin-top:10px">
         <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
-          <input id="tr_name" placeholder="ФИО игрока (напр. Виктор Дьёкереш)" style="flex:2;min-width:200px">
+          <input id="tr_name" placeholder="ФИО игрока (напр. Виктор Дьёкереш)" style="flex:2;min-width:190px">
+          <select id="tr_pos" style="width:auto;min-width:110px" title="Позиция игрока">
+            <option value="">Позиция…</option>
+            <option value="ВР">ВР (Вратарь)</option>
+            <option value="ЦЗ">ЦЗ (Центр. защитник)</option>
+            <option value="ЛЗ">ЛЗ (Левый защитник)</option>
+            <option value="ПЗ">ПЗ (Правый защитник)</option>
+            <option value="ОП">ОП (Опорный полузащитник)</option>
+            <option value="ЦП">ЦП (Центр. полузащитник)</option>
+            <option value="АП">АП (Атак. полузащитник)</option>
+            <option value="ЛВ">ЛВ (Левый вингер)</option>
+            <option value="ПВ">ПВ (Правый вингер)</option>
+            <option value="ЦФ">ЦФ (Центр. нападающий)</option>
+          </select>
+          <input type="number" id="tr_age" min="14" max="45" placeholder="Возраст" title="Возраст игрока (лет)" style="width:92px">
+          <input id="tr_club" placeholder="Клуб (напр. Спортинг)" style="flex:1.4;min-width:160px">
           <input id="tr_fee" placeholder="Сумма (напр. €65M)" value="€15.0M" style="flex:1;min-width:110px">
           <select id="tr_type" style="width:auto;min-width:140px">
             <option value="transfer">Полноценный трансфер</option>
@@ -4247,11 +4262,11 @@ function renderEuropeanTransferPanelHtml() {
       <!-- Ввод списка игроков -->
       <div id="tr_batch_wrap" style="display:none;margin-top:10px">
         <p class="muted small" style="margin:0 0 6px">
-          Введите список игроков (каждый с новой строки). Формат: <code>ФИО, Сумма, Тип сделки, Sell-on (от 1% до 90%)</code>. Можно указать любое условие выкупа (например: <code>условие: выход в еврокубки</code>).
+          Введите список игроков (каждый с новой строки). Формат: <code>ФИО, Позиция, Возраст, Клуб, Сумма, Тип сделки, Sell-on</code>. Можно указать условие выкупа (например: <code>условие: выход в еврокубки</code>).
         </p>
-        <textarea id="tr_batch_text" rows="4" style="width:100%;font-family:monospace;font-size:13px;padding:8px 10px;border-radius:6px;border:1px solid #cbd5e1;box-sizing:border-box" placeholder="Виктор Дьёкереш, €65M, покупка, 25% sell-on&#10;Арда Гюлер, €18M, аренда с обязательным выкупом (условие: выход в топ-4), 30% sell-on&#10;Эндрик, €20M, аренда с выкупом, 15% sell-on"></textarea>
+        <textarea id="tr_batch_text" rows="4" style="width:100%;font-family:monospace;font-size:13px;padding:8px 10px;border-radius:6px;border:1px solid #cbd5e1;box-sizing:border-box" placeholder="Виктор Дьёкереш, ЦФ, 26, Спортинг, €65M, покупка, 25% sell-on&#10;Арда Гюлер, АП, 21, Реал Мадрид, €18M, аренда с обязательным выкупом (условие: выход в топ-4), 30% sell-on&#10;Эндрик, ЦФ, 20, Реал Мадрид, €20M, аренда с выкупом, 15% sell-on"></textarea>
         <div class="row sp" style="margin-top:8px;align-items:center;flex-wrap:wrap;gap:8px">
-          <span class="muted small">💡 Процент перепродажи может быть любым от 1% до 90%, а условие выкупа — любым</span>
+          <span class="muted small">💡 Позиция: ВР, ЦЗ, ЛЗ, ПЗ, ОП, ЦП, АП, ЛВ, ПВ, ЦФ · Процент перепродажи от 0% до 90%</span>
           <button class="btn" id="tr_batch_send" style="background:#1d4ed8;color:#fff">Отправить весь список админу 🚀</button>
         </div>
       </div>
@@ -4355,6 +4370,10 @@ function setupEuropeanTransferHandlers(app, refreshFn) {
   if (btnSend) {
     btnSend.onclick = async () => {
       const pName = $('#tr_name')?.value?.trim();
+      const pPos = $('#tr_pos')?.value?.trim();
+      const pAgeRaw = $('#tr_age')?.value?.trim();
+      const pAge = pAgeRaw ? Number(pAgeRaw) : 0;
+      const pClub = $('#tr_club')?.value?.trim();
       const feeVal = $('#tr_fee')?.value?.trim() || '€10.0M';
       const trType = $('#tr_type')?.value || 'transfer';
       const isMand = $('#tr_mandatory_rpl')?.checked || trType === 'loan_mandatory_rpl';
@@ -4369,10 +4388,16 @@ function setupEuropeanTransferHandlers(app, refreshFn) {
       if (sellOnVal < 0) sellOnVal = 0;
 
       if (!pName) return toast('Укажите ФИО игрока');
+      if (!pPos) return toast('Укажите позицию игрока');
+      if (!pAge || pAge < 14 || pAge > 45) return toast('Укажите корректный возраст игрока (от 14 до 45 лет)');
+      if (!pClub) return toast('Укажите текущий клуб игрока');
       btnSend.disabled = true;
       btnSend.textContent = 'Нейросеть обрабатывает…';
       const r = await act(() => api('/club/transfer-request', withT({
         playerName: pName,
+        pos: pPos,
+        age: pAge,
+        fromClub: pClub,
         fee: feeVal,
         transferType: trType,
         mandatoryBuyout: isMand,
@@ -5735,19 +5760,29 @@ async function pgClub(app) {
       </div>`;
 
     if (CTT === 'free') {
+      const pendingFa = (outg || []).filter(t => t.type === 'free_agent' && t.status === 'pending');
+      const pendingFaIds = new Set(pendingFa.map(t => t.pid));
       cb.innerHTML = `
         ${trSubTabs}
         <div class="panel">
           <div class="row sp" style="flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
             <div>
               <h3 style="margin:0">🆓 Рынок свободных агентов</h3>
-              <p class="muted small" style="margin:4px 0 0">Футболисты без контракта с клубом. Подписанный игрок сразу переходит в общий состав клуба (без трансферной стоимости).</p>
+              <p class="muted small" style="margin:4px 0 0">Футболисты без контракта с клубом. Заявка на подписание отправляется администратору лиги — после его одобрения игрок переходит в общий состав клуба.</p>
             </div>
             <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;margin:0">
               <input type="checkbox" id="fa_auto_reg" style="width:auto" ${rwTr.canEdit ? 'checked' : 'disabled'}>
-              <span>Сразу включить в заявку на сезон (если окно открыто и есть место до ${c.squadMax})</span>
+              <span>После одобрения включить в заявку на сезон (если окно открыто и есть место до ${c.squadMax})</span>
             </label>
           </div>
+          ${pendingFa.length ? `
+            <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:8px 12px;margin-bottom:12px">
+              <div style="font-weight:700;font-size:13px;color:#92400e">⏳ Заявки на подписание свободных агентов, ожидающие одобрения админа (${pendingFa.length}):</div>
+              <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:5px">
+                ${pendingFa.map(t => `<span class="tag sm" style="background:#fff;border-color:#fde68a"><b>${e(t.pName || t.playerName)}</b> (${e(t.pos)})</span>`).join('')}
+              </div>
+            </div>
+          ` : ''}
           <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:12px">
             <input id="fa_q" placeholder="Поиск по имени, стране или бывшему клубу..." style="flex:2;min-width:220px">
             <select id="fa_pos" style="flex:1;min-width:160px;max-width:240px">
@@ -5781,6 +5816,7 @@ async function pgClub(app) {
             ${list.map(p => {
               const leg = resolveLegionBadge(p);
               const legTag = `<span class="tag" style="${leg.tagClass === 'legion' ? 'background:#fee2e2;color:#991b1b;border-color:#fca5a5' : (leg.tagClass === 'eaeu' ? 'background:#f0fdf4;color:#166534;border-color:#bbf7d0' : 'background:#eff6ff;color:#1e40af;border-color:#bfdbfe')}">${e(leg.label)}</span>`;
+              const isPendingFa = pendingFaIds.has(p.id);
               return `<tr>
                 <td class="l"><b>${e(p.name)}</b></td>
                 <td>${e(p.pos)}</td>
@@ -5788,13 +5824,15 @@ async function pgClub(app) {
                 <td class="l">${legTag} <span class="small muted">${e(p.nation || 'Россия')}</span></td>
                 <td class="l small">${p.formerClub ? `<span class="tag">${e(p.formerClub)}</span>` : '<span class="muted">Свободный агент</span>'}${p.releasedAt ? `<div class="muted" style="font-size:11px">с ${e(p.releasedAt)}</div>` : ''}</td>
                 <td class="l muted small" style="white-space:normal;max-width:280px">${e(p.style || '')}</td>
-                <td><button class="btn sm" data-fa-sign="${p.id}">Подписать в состав</button></td>
+                <td>${isPendingFa
+                  ? '<span class="tag" style="background:#fef3c7;color:#92400e;font-weight:700">⏳ На одобрении у админа</span>'
+                  : `<button class="btn sm" data-fa-sign="${p.id}">Подписать в состав</button>`}</td>
               </tr>`;
             }).join('')}
           </tbody></table>`;
           box.querySelectorAll('[data-fa-sign]').forEach(btn => btn.onclick = async () => {
             const resSign = await act(() => api('/club/free-agent/sign', withT({ playerId: btn.dataset.faSign, register: !!$('#fa_auto_reg')?.checked })));
-            if (resSign) { toast(resSign.message || 'Свободный агент подписан'); pgClub(app); }
+            if (resSign) { toast(resSign.message || 'Заявка отправлена админу на одобрение'); pgClub(app); }
           });
         } catch (err) {
           box.innerHTML = `<div class="warn">${e(err.message || 'Ошибка загрузки')}</div>`;
@@ -5880,15 +5918,15 @@ async function pgClub(app) {
         <p class="muted small" style="margin-bottom:10px">Игроки, которых ваш клуб хочет приобрести, взять в аренду или выменять у других клубов РПЛ.</p>
         ${outg.length ? outg.map(t => {
           const isExchange = t.type === 'exchange';
+          const isFreeAgent = t.type === 'free_agent';
           return `
             <div class="row sp" style="padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap;gap:8px">
               <div>
                 <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">
                   <b>${e(t.pName || t.playerName)}</b> <span class="tag">${e(t.pos)}</span>
-                  <span class="muted">из</span>
-                  ${t.fromLogo ? `<img class="t-logo sm" src="${t.fromLogo}" alt="" style="width:18px;height:18px">` : ''}
-                  <b>${e(t.fromName)}</b>
-                  <span class="tag" style="font-weight:700">${e(t.fee)}</span>
+                  ${isFreeAgent
+                    ? `<span class="tag" style="background:#f0fdf4;color:#166534;font-weight:700">🆓 Свободный агент</span><span class="muted small">${e(t.fromName || 'Свободный агент')}</span>`
+                    : `<span class="muted">из</span> ${t.fromLogo ? `<img class="t-logo sm" src="${t.fromLogo}" alt="" style="width:18px;height:18px">` : ''} <b>${e(t.fromName)}</b> <span class="tag" style="font-weight:700">${e(t.fee)}</span>`}
                   ${isExchange ? `<span class="tag" style="background:#7c3aed;color:#fff;font-weight:700">🔄 Обмен на: ${e(t.exchangePName || 'вашего игрока')}</span>` : ''}
                   ${(t.mandatoryBuyoutOnRplRetention || t.mandatoryBuyout) ? `<span class="tag sm" style="background:#fef3c7;color:#92400e;font-weight:700">🛡️ Выкуп (${e(t.buyoutFee || '€8.0M')}${t.loanCondition ? `, ${e(t.loanCondition)}` : ''})</span>` : ''}
                   ${t.sellOnPercent ? `<span class="tag sm" style="background:#f3e8ff;color:#6b21a8;font-weight:700">🏷️ Sell-on ${t.sellOnPercent}%</span>` : ''}
@@ -5896,11 +5934,11 @@ async function pgClub(app) {
                 <div class="muted small" style="margin-top:3px">${e(t.note || '')} · Запрос подан: ${e(t.date || '')}</div>
               </div>
               <div class="row" style="gap:6px;flex-wrap:wrap">
-                ${t.clubApproval === 'approved'
+                ${isFreeAgent ? '' : (t.clubApproval === 'approved'
                   ? `<span class="tag" style="background:#dcfce7;color:#166534">✅ Клуб согласился</span>`
                   : t.clubApproval === 'rejected'
                   ? `<span class="tag" style="background:#fee2e2;color:#991b1b">❌ Клуб отказал</span>`
-                  : `<span class="tag" style="background:#fef3c7;color:#92400e">⏳ Ожидает ответа клуба</span>`}
+                  : `<span class="tag" style="background:#fef3c7;color:#92400e">⏳ Ожидает ответа клуба</span>`)}
                 ${t.adminApproval === 'approved'
                   ? `<span class="tag" style="background:#dcfce7;color:#166534">✅ Админ одобрил</span>`
                   : `<span class="tag" style="background:#fef3c7;color:#92400e">⏳ Ожидает админа</span>`}
@@ -8579,6 +8617,7 @@ async function pgAdmin(app) {
           ${ov.transfers.length ? ov.transfers.map(t => {
             const isRpl = t.isRplToRpl;
             const isExchange = t.type === 'exchange';
+            const isFreeAgent = t.type === 'free_agent';
             const adminStatusBadge = t.adminApproval === 'approved'
               ? '<span class="tag" style="background:#dcfce7;color:#166534;font-weight:600">✅ Администратор: Одобрено</span>'
               : t.adminApproval === 'rejected'
@@ -8591,6 +8630,8 @@ async function pgAdmin(app) {
                 : t.clubApproval === 'rejected'
                 ? `<span class="tag" style="background:#fee2e2;color:#991b1b;font-weight:600">❌ Клуб «${e(t.fromName || teamName(t.from))}»: Отклонил</span>`
                 : `<span class="tag" style="background:#fef3c7;color:#92400e;font-weight:600">⏳ Клуб «${e(t.fromName || teamName(t.from))}»: Ожидает ответа владельца</span>`)
+              : isFreeAgent
+              ? '<span class="tag" style="background:#f0fdf4;color:#166534">🆓 Свободный агент (без клуба)</span>'
               : '<span class="tag muted">Клуб: Внешний переход</span>';
 
             const finalStatusBadge = t.status === 'approved'
@@ -8600,13 +8641,13 @@ async function pgAdmin(app) {
               : '<span class="tag" style="background:#f59e0b;color:#fff;font-weight:700">Ожидает согласования</span>';
 
             return `
-              <div class="panel" style="border:1.5px solid ${isExchange ? '#c4b5fd' : 'var(--line)'};padding:12px 14px;border-radius:10px;background:#ffffff">
+              <div class="panel" style="border:1.5px solid ${isExchange ? '#c4b5fd' : isFreeAgent ? '#86efac' : 'var(--line)'};padding:12px 14px;border-radius:10px;background:#ffffff">
                 <div class="row sp" style="flex-wrap:wrap;gap:10px;align-items:center">
                   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
                     <span style="font-size:16px;font-weight:700">${e(t.pName || t.playerName)}</span>
                     <span class="tag">${e(t.pos || 'Игрок')}</span>
-                    <span class="tag" style="background:${isExchange ? '#7c3aed;color:#fff' : '#f1f5f9'};font-weight:600">
-                      ${isExchange ? '🔄 Обмен игроками' : t.type === 'loan' ? '🔄 Аренда' : '📦 Трансфер'}
+                    <span class="tag" style="background:${isExchange ? '#7c3aed;color:#fff' : isFreeAgent ? '#dcfce7;color:#166534' : '#f1f5f9'};font-weight:600">
+                      ${isExchange ? '🔄 Обмен игроками' : isFreeAgent ? '🆓 Свободный агент' : t.type === 'loan' ? '🔄 Аренда' : '📦 Трансфер'}
                     </span>
                     <span class="tag" style="background:#fef3c7;color:#92400e;font-weight:800;font-size:13px">💰 ${e(t.fee || 'По договоренности')}</span>
                     ${isRpl ? '<span class="tag" style="background:#e0f2fe;color:#0369a1;font-weight:700">РПЛ ↔ РПЛ (Двойное одобрение)</span>' : ''}
