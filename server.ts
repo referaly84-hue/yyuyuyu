@@ -14889,14 +14889,15 @@ function parseEuroAge(raw) {
   const n = Number(m[0]);
   return n >= 14 && n <= 45 ? n : null;
 }
-async function enrichEuropeanPlayer(playerName, feeStr, transferType = "transfer", hints: { pos?: string; age?: number | null; fromClub?: string } = {}) {
+async function enrichEuropeanPlayer(playerName, feeStr, transferType = "transfer", hints: { pos?: string; age?: number | null; fromClub?: string; nationality?: string } = {}) {
   const cleanName = String(playerName || "").trim();
   const hPos = normalizeEuroPos(hints?.pos);
   const hAge = parseEuroAge(hints?.age);
   const hClub = String(hints?.fromClub || "").trim();
+  const hNat = String(hints?.nationality || "").trim();
   let pos = hPos || "ЦП";
   let age2 = hAge || 24;
-  let nationality = "Иностранец";
+  let nationality = hNat || "Иностранец";
   let fromClub = hClub || "Зарубежный клуб";
   let marketValue = feeStr || "€10.0M";
   let ovr = 75;
@@ -14905,6 +14906,7 @@ async function enrichEuropeanPlayer(playerName, feeStr, transferType = "transfer
     ...resObj,
     pos: hPos || resObj.pos,
     age: hAge || resObj.age,
+    nationality: hNat || resObj.nationality,
     fromClub: hClub || resObj.fromClub
   });
   if (hasLLM()) {
@@ -14912,6 +14914,7 @@ async function enrichEuropeanPlayer(playerName, feeStr, transferType = "transfer
       const hintCtx = [
         hPos ? `позиция: ${hPos}` : "",
         hAge ? `возраст: ${hAge}` : "",
+        hNat ? `страна/гражданство: ${hNat}` : "",
         hClub ? `текущий клуб: ${hClub}` : ""
       ].filter(Boolean).join(", ");
       const prompt = `Ты — международная футбольная база данных и скаутская служба Transfermarkt. Найди реального футболиста "${cleanName}"${hintCtx ? ` (указанные данные: ${hintCtx})` : ""}.
@@ -14937,7 +14940,7 @@ async function enrichEuropeanPlayer(playerName, feeStr, transferType = "transfer
       const info = await llmJSON("Ты — футбольная база данных.", prompt, { task: "enrich-player", temp: 0.2, max: 400 });
       if (!hPos && info?.pos && POSES.includes(info.pos)) pos = info.pos;
       if (!hAge && info?.age && Number(info.age) >= 16 && Number(info.age) <= 45) age2 = Number(info.age);
-      if (info?.nationality) nationality = String(info.nationality);
+      if (!hNat && info?.nationality) nationality = String(info.nationality);
       if (!hClub && info?.fromClub) fromClub = String(info.fromClub);
       if (info?.marketValue) marketValue = String(info.marketValue);
       if (info?.ovr && Number(info.ovr) >= 60 && Number(info.ovr) <= 99) ovr = Number(info.ovr);
@@ -14963,8 +14966,9 @@ async function enrichEuropeanPlayer(playerName, feeStr, transferType = "transfer
   }
   return applyHints({ pos, age: age2, nationality, fromClub, marketValue: feeStr || `€${(ovr - 65) * 1.5}M`, ovr, style });
 }
+const EURO_COUNTRY_RE = /^(?:россия|беларусь|белоруссия|казахстан|армения|кыргызстан|киргизия|узбекистан|грузия|азербайджан|украина|молдова|бразилия|аргентина|уругвай|колумбия|чили|эквадор|парагвай|перу|венесуэла|мексика|сша|канада|коста-рика|испания|франция|германия|италия|англия|португалия|нидерланды|голландия|бельгия|сербия|хорватия|босния|черногория|словения|словакия|чехия|польша|венгрия|румыния|болгария|греция|турция|швеция|норвегия|дания|финляндия|исландия|швейцария|австрия|шотландия|уэльс|ирландия|албания|северная македония|македония|нигерия|сенегал|марокко|камерун|гана|кот-д'?ивуар|египет|алжир|тунис|мали|гвинея|юар|замбия|др конго|конго|кабо-верде|ангола|япония|южная корея|корея|иран|китай|австралия|новая зеландия|израиль|саудовская аравия)$/i;
 app.post("/api/club/transfer-request", needClub, async (req, res) => {
-  const { playerName, fee, transferType, list, text, players, pos, age, fromClub, club, europeanClub } = req.body;
+  const { playerName, fee, transferType, list, text, players, pos, age, fromClub, club, europeanClub, nationality, nation, country, fromCountry } = req.body;
   const buyerTeam = team(req.me.teamId);
   if (!buyerTeam) return fail(res, "Клуб не найден");
   let itemsToProcess = [];
@@ -14975,6 +14979,7 @@ app.post("/api/club/transfer-request", needClub, async (req, res) => {
         name: String(p.playerName || p.name || "").trim(),
         pos: normalizeEuroPos(p.pos),
         age: parseEuroAge(p.age),
+        nationality: String(p.nationality || p.nation || p.country || p.fromCountry || "").trim(),
         fromClub: String(p.fromClub || p.club || p.europeanClub || "").trim(),
         fee: String(p.fee || "€5.0M").trim(),
         type: isMand ? "loan_mandatory_rpl" : String(p.transferType || p.type || "").includes("loan") ? "loan" : "transfer",
@@ -15002,8 +15007,10 @@ app.post("/api/club/transfer-request", needClub, async (req, res) => {
       if (condMatch) cond = condMatch[1].trim();
       let parsedPos = "";
       let parsedAge = null;
+      let parsedNat = "";
       let parsedClub = "";
       let feePart = "";
+      const freeTextTokens = [];
       for (const tok of parts.slice(1)) {
         const maybePos = normalizeEuroPos(tok);
         if (!parsedPos && maybePos) {
@@ -15017,6 +15024,14 @@ app.post("/api/club/transfer-request", needClub, async (req, res) => {
             continue;
           }
         }
+        if (/^(?:страна|гражданство)[:\s]+/i.test(tok)) {
+          parsedNat = tok.replace(/^(?:страна|гражданство)[:\s]+/i, "").trim();
+          continue;
+        }
+        if (/^клуб[:\s]+/i.test(tok)) {
+          parsedClub = tok.replace(/^клуб[:\s]+/i, "").trim();
+          continue;
+        }
         if (!feePart && (/[€$₽]|\b\d+(?:[.,]\d+)?\s*(?:M|K|млн|тыс)\b/i.test(tok) || /^\d+(?:[.,]\d+)?$/.test(tok))) {
           feePart = tok;
           continue;
@@ -15024,8 +15039,29 @@ app.post("/api/club/transfer-request", needClub, async (req, res) => {
         if (/(?:покупка|трансфер|аренда|loan|transfer|выкуп|sell[- ]?on|перепродаж|услови|%)/i.test(tok)) {
           continue;
         }
-        if (!parsedClub) {
-          parsedClub = tok.replace(/^клуб[:\s]*/i, "").trim();
+        freeTextTokens.push(tok);
+      }
+      if (freeTextTokens.length >= 2) {
+        if (!parsedNat && !parsedClub) {
+          if (EURO_COUNTRY_RE.test(freeTextTokens[1]) && !EURO_COUNTRY_RE.test(freeTextTokens[0])) {
+            parsedClub = freeTextTokens[0];
+            parsedNat = freeTextTokens[1];
+          } else {
+            parsedNat = freeTextTokens[0];
+            parsedClub = freeTextTokens[1];
+          }
+        } else if (!parsedNat) {
+          parsedNat = freeTextTokens[0];
+        } else if (!parsedClub) {
+          parsedClub = freeTextTokens[0];
+        }
+      } else if (freeTextTokens.length === 1) {
+        if (!parsedNat && EURO_COUNTRY_RE.test(freeTextTokens[0])) {
+          parsedNat = freeTextTokens[0];
+        } else if (!parsedClub) {
+          parsedClub = freeTextTokens[0];
+        } else if (!parsedNat) {
+          parsedNat = freeTextTokens[0];
         }
       }
       if (!feePart) feePart = "€5.0M";
@@ -15033,6 +15069,7 @@ app.post("/api/club/transfer-request", needClub, async (req, res) => {
         name,
         pos: parsedPos,
         age: parsedAge,
+        nationality: parsedNat,
         fromClub: parsedClub,
         fee: feePart,
         type: isMand ? "loan_mandatory_rpl" : isLoan ? "loan" : "transfer",
@@ -15048,6 +15085,7 @@ app.post("/api/club/transfer-request", needClub, async (req, res) => {
       name: String(playerName).trim(),
       pos: normalizeEuroPos(pos),
       age: parseEuroAge(age),
+      nationality: String(nationality || nation || country || fromCountry || "").trim(),
       fromClub: String(fromClub || club || europeanClub || "").trim(),
       fee: String(fee || "€5.0M").trim(),
       type: isMand ? "loan_mandatory_rpl" : String(transferType || "").includes("loan") ? "loan" : "transfer",
@@ -15058,13 +15096,14 @@ app.post("/api/club/transfer-request", needClub, async (req, res) => {
     });
   }
   if (!itemsToProcess.length) {
-    return fail(res, "Укажите ФИО игрока, позицию, возраст, клуб и цену (или введите список игроков)");
+    return fail(res, "Укажите ФИО игрока, позицию, возраст, страну, клуб и цену (или введите список игроков)");
   }
   const createdRequests = [];
   for (const item of itemsToProcess) {
     const enriched = await enrichEuropeanPlayer(item.name, item.fee, item.type, {
       pos: item.pos,
       age: item.age,
+      nationality: item.nationality,
       fromClub: item.fromClub
     });
     const reqObj = {
@@ -15246,7 +15285,8 @@ app.post("/api/admin/transfer-requests/resolve", admin, (req, res) => {
       pos: r.pos || "ЦП",
       age: playerAge,
       born: `${seasonBaseYear - playerAge}-05-15`,
-      nat: r.nationality || "\u0418\u043D\u043E\u0441\u0442\u0440\u0430\u043D\u0435\u0446",
+      nation: r.nationality || "Иностранец",
+      nat: r.nationality || "Иностранец",
       teamId: r.clubId,
       ovr: r.ovr || 75,
       style: r.style || "\u041B\u0435\u0433\u0438\u043E\u043D\u0435\u0440 \u0441 \u043E\u043F\u044B\u0442\u043E\u043C \u0432\u044B\u0441\u0442\u0443\u043F\u043B\u0435\u043D\u0438\u0439 \u0432 \u0435\u0432\u0440\u043E\u043F\u0435\u0439\u0441\u043A\u043E\u043C \u0447\u0435\u043C\u043F\u0438\u043E\u043D\u0430\u0442\u0435",

@@ -4182,7 +4182,7 @@ function renderEuropeanTransferPanelHtml() {
             <span class="tag" style="background:#dbeafe;color:#1e40af;font-size:11.5px">Проверка админа + ИИ</span>
           </h3>
           <p class="muted small" style="margin:4px 0 0">
-            Для заявки укажите <b>ФИО игрока</b>, <b>позицию</b>, <b>возраст</b>, <b>текущий клуб</b> и <b>сумму сделки</b> (покупка или аренда). Остальные данные (гражданство, рыночную цену и профиль) <b>нейросеть дополнит автоматически</b>. Заявка поступит администратору лиги.
+            Для заявки укажите <b>ФИО игрока</b>, <b>позицию</b>, <b>возраст</b>, <b>страну</b>, <b>текущий клуб</b> и <b>сумму сделки</b> (покупка или аренда). Остальные данные (рыночную цену и профиль) <b>нейросеть дополнит автоматически</b>. Заявка поступит администратору лиги.
           </p>
         </div>
         <div class="row" style="gap:4px">
@@ -4209,7 +4209,8 @@ function renderEuropeanTransferPanelHtml() {
             <option value="ЦФ">ЦФ (Центр. нападающий)</option>
           </select>
           <input type="number" id="tr_age" min="14" max="45" placeholder="Возраст" title="Возраст игрока (лет)" style="width:92px">
-          <input id="tr_club" placeholder="Клуб (напр. Спортинг)" style="flex:1.4;min-width:160px">
+          <input id="tr_country" placeholder="Страна (напр. Швеция)" title="Страна / гражданство игрока" style="flex:1.1;min-width:140px">
+          <input id="tr_club" placeholder="Клуб (напр. Спортинг)" style="flex:1.3;min-width:150px">
           <input id="tr_fee" placeholder="Сумма (напр. €65M)" value="€15.0M" style="flex:1;min-width:110px">
           <select id="tr_type" style="width:auto;min-width:140px">
             <option value="transfer">Полноценный трансфер</option>
@@ -4262,9 +4263,9 @@ function renderEuropeanTransferPanelHtml() {
       <!-- Ввод списка игроков -->
       <div id="tr_batch_wrap" style="display:none;margin-top:10px">
         <p class="muted small" style="margin:0 0 6px">
-          Введите список игроков (каждый с новой строки). Формат: <code>ФИО, Позиция, Возраст, Клуб, Сумма, Тип сделки, Sell-on</code>. Можно указать условие выкупа (например: <code>условие: выход в еврокубки</code>).
+          Введите список игроков (каждый с новой строки). Формат: <code>ФИО, Позиция, Возраст, Страна, Клуб, Сумма, Тип сделки, Sell-on</code>. Можно указать условие выкупа (например: <code>условие: выход в еврокубки</code>).
         </p>
-        <textarea id="tr_batch_text" rows="4" style="width:100%;font-family:monospace;font-size:13px;padding:8px 10px;border-radius:6px;border:1px solid #cbd5e1;box-sizing:border-box" placeholder="Виктор Дьёкереш, ЦФ, 26, Спортинг, €65M, покупка, 25% sell-on&#10;Арда Гюлер, АП, 21, Реал Мадрид, €18M, аренда с обязательным выкупом (условие: выход в топ-4), 30% sell-on&#10;Эндрик, ЦФ, 20, Реал Мадрид, €20M, аренда с выкупом, 15% sell-on"></textarea>
+        <textarea id="tr_batch_text" rows="4" style="width:100%;font-family:monospace;font-size:13px;padding:8px 10px;border-radius:6px;border:1px solid #cbd5e1;box-sizing:border-box" placeholder="Виктор Дьёкереш, ЦФ, 26, Швеция, Спортинг, €65M, покупка, 25% sell-on&#10;Арда Гюлер, АП, 21, Турция, Реал Мадрид, €18M, аренда с обязательным выкупом (условие: выход в топ-4), 30% sell-on&#10;Эндрик, ЦФ, 20, Бразилия, Реал Мадрид, €20M, аренда с выкупом, 15% sell-on"></textarea>
         <div class="row sp" style="margin-top:8px;align-items:center;flex-wrap:wrap;gap:8px">
           <span class="muted small">💡 Позиция: ВР, ЦЗ, ЛЗ, ПЗ, ОП, ЦП, АП, ЛВ, ПВ, ЦФ · Процент перепродажи от 0% до 90%</span>
           <button class="btn" id="tr_batch_send" style="background:#1d4ed8;color:#fff">Отправить весь список админу 🚀</button>
@@ -4373,6 +4374,7 @@ function setupEuropeanTransferHandlers(app, refreshFn) {
       const pPos = $('#tr_pos')?.value?.trim();
       const pAgeRaw = $('#tr_age')?.value?.trim();
       const pAge = pAgeRaw ? Number(pAgeRaw) : 0;
+      const pCountry = $('#tr_country')?.value?.trim();
       const pClub = $('#tr_club')?.value?.trim();
       const feeVal = $('#tr_fee')?.value?.trim() || '€10.0M';
       const trType = $('#tr_type')?.value || 'transfer';
@@ -4390,6 +4392,7 @@ function setupEuropeanTransferHandlers(app, refreshFn) {
       if (!pName) return toast('Укажите ФИО игрока');
       if (!pPos) return toast('Укажите позицию игрока');
       if (!pAge || pAge < 14 || pAge > 45) return toast('Укажите корректный возраст игрока (от 14 до 45 лет)');
+      if (!pCountry) return toast('Укажите страну игрока');
       if (!pClub) return toast('Укажите текущий клуб игрока');
       btnSend.disabled = true;
       btnSend.textContent = 'Нейросеть обрабатывает…';
@@ -4397,6 +4400,7 @@ function setupEuropeanTransferHandlers(app, refreshFn) {
         playerName: pName,
         pos: pPos,
         age: pAge,
+        nationality: pCountry,
         fromClub: pClub,
         fee: feeVal,
         transferType: trType,
